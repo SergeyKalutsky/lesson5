@@ -15,11 +15,7 @@ import copy
 content_layers_default = ['conv_4']
 style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 
-cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
-cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
 
-# create a module to normalize input image so we can easily put it in a
-# nn.Sequential
 class Normalization(nn.Module):
     def __init__(self, mean, std):
         super(Normalization, self).__init__()
@@ -33,10 +29,11 @@ class Normalization(nn.Module):
         # normalize img
         return (img - self.mean) / self.std
 
-def image_loader(image_name, imsize):
+
+def image_loader(image_name, imsize, device):
     loader = transforms.Compose([
-      # transforms.Resize(imsize),  # Изменяет размер изображения
-      transforms.ToTensor()])  # трансформирует изображение в тенсор
+        # transforms.Resize(imsize),  # Изменяет размер изображения
+        transforms.ToTensor()])  # трансформирует изображение в тенсор
 
     image = Image.open(image_name)
     image = image.resize((imsize, imsize))
@@ -53,7 +50,7 @@ def imshow(tensor, title=None):
     plt.imshow(image)
     if title is not None:
         plt.title(title)
-    plt.pause(0.001) # pause a bit so that plots are updated
+    plt.pause(0.001)  # pause a bit so that plots are updated
 
 
 def gram_matrix(input):
@@ -69,6 +66,7 @@ def gram_matrix(input):
     # by dividing by the number of element in each feature maps.
     return G.div(a * b * c * d)
 
+
 class ContentLoss(nn.Module):
 
     def __init__(self, target,):
@@ -78,6 +76,7 @@ class ContentLoss(nn.Module):
     def forward(self, input):
         self.loss = F.mse_loss(input, self.target)
         return input
+
 
 class StyleLoss(nn.Module):
 
@@ -90,14 +89,17 @@ class StyleLoss(nn.Module):
         self.loss = F.mse_loss(G, self.target)
         return input
 
-def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
+
+def get_style_model_and_losses(cnn, device,
                                style_img, content_img,
                                content_layers=content_layers_default,
                                style_layers=style_layers_default):
     cnn = copy.deepcopy(cnn)
-
+    normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
+    normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
     # normalization module
-    normalization = Normalization(normalization_mean, normalization_std).to(device)
+    normalization = Normalization(
+        normalization_mean, normalization_std).to(device)
 
     # just in order to have an iterable access to or list of content/syle
     # losses
@@ -124,7 +126,8 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
         elif isinstance(layer, nn.BatchNorm2d):
             name = 'bn_{}'.format(i)
         else:
-            raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
+            raise RuntimeError('Unrecognized layer: {}'.format(
+                layer.__class__.__name__))
 
         model.add_module(name, layer)
 
@@ -151,18 +154,20 @@ def get_style_model_and_losses(cnn, normalization_mean, normalization_std,
 
     return model, style_losses, content_losses
 
+
 def get_input_optimizer(input_img):
     # this line to show that input is a parameter that requires a gradient
     optimizer = optim.LBFGS([input_img.requires_grad_()])
     return optimizer
 
-def run_style_transfer(cnn, normalization_mean, normalization_std,
+
+def run_style_transfer(cnn, device,
                        content_img, style_img, input_img, num_steps=300,
                        style_weight=1000000, content_weight=1):
     """Run the style transfer."""
     print('Building the style transfer model..')
     model, style_losses, content_losses = get_style_model_and_losses(cnn,
-        normalization_mean, normalization_std, style_img, content_img)
+                                                                     device, style_img, content_img)
     optimizer = get_input_optimizer(input_img)
 
     print('Optimizing..')
