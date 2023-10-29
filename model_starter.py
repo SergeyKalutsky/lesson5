@@ -2,16 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
 from PIL import Image
-import matplotlib.pyplot as plt
-
 import torchvision.transforms as transforms
-import torchvision.models as models
-
 import copy
 
-# desired depth layers to compute style/content losses :
+# желаемая глубина слоев для рассчета потерь стиля/контента:
 content_layers_default = ['conv_4']
 style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 
@@ -19,20 +14,19 @@ style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 class Normalization(nn.Module):
     def __init__(self, mean, std):
         super(Normalization, self).__init__()
-        # .view the mean and std to make them [C x 1 x 1] so that they can
-        # directly work with image Tensor of shape [B x C x H x W].
-        # B is batch size. C is number of channels. H is height and W is width.
+        # Конвертируем среднее и станд. отклонение в форму [C x 1 x 1] чтобы они могли
+        # напрямую работать с тенсором формы [B x C x H x W].
+        # B размер батча. C - кол-во коналов. H высота и W ширина.
         self.mean = torch.tensor(mean).view(-1, 1, 1)
         self.std = torch.tensor(std).view(-1, 1, 1)
 
     def forward(self, img):
-        # normalize img
+        # Нормализуем изображение
         return (img - self.mean) / self.std
 
 
 def image_loader(image_name, imsize, device):
     loader = transforms.Compose([
-        # transforms.Resize(imsize),  # Изменяет размер изображения
         transforms.ToTensor()])  # трансформирует изображение в тенсор
 
     image = Image.open(image_name)
@@ -41,29 +35,10 @@ def image_loader(image_name, imsize, device):
     return image.to(device, torch.float)
 
 
-def imshow(tensor, title=None):
-    unloader = transforms.ToPILImage()  # reconvert into PIL image
-    plt.ion()
-    image = tensor.cpu().clone()  # we clone the tensor to not do changes on it
-    image = image.squeeze(0)      # remove the fake batch dimension
-    image = unloader(image)
-    plt.imshow(image)
-    if title is not None:
-        plt.title(title)
-    plt.pause(0.001)  # pause a bit so that plots are updated
-
-
 def gram_matrix(input):
-    a, b, c, d = input.size()  # a=batch size(=1)
-    # b=number of feature maps
-    # (c,d)=dimensions of a f. map (N=c*d)
-
-    features = input.view(a * b, c * d)  # resise F_XL into \hat F_XL
-
-    G = torch.mm(features, features.t())  # compute the gram product
-
-    # we 'normalize' the values of the gram matrix
-    # by dividing by the number of element in each feature maps.
+    a, b, c, d = input.size()  
+    features = input.view(a * b, c * d)  
+    G = torch.mm(features, features.t()) 
     return G.div(a * b * c * d)
 
 
@@ -97,29 +72,22 @@ def get_style_model_and_losses(cnn, device,
     cnn = copy.deepcopy(cnn)
     normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
     normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
-    # normalization module
     normalization = Normalization(
         normalization_mean, normalization_std).to(device)
 
-    # just in order to have an iterable access to or list of content/syle
-    # losses
+    # Потери
     content_losses = []
     style_losses = []
 
-    # assuming that cnn is a nn.Sequential, so we make a new nn.Sequential
-    # to put in modules that are supposed to be activated sequentially
     model = nn.Sequential(normalization)
 
-    i = 0  # increment every time we see a conv
+    i = 0  # инкремируем каждый раз, если слой конволюция
     for layer in cnn.children():
         if isinstance(layer, nn.Conv2d):
             i += 1
             name = 'conv_{}'.format(i)
         elif isinstance(layer, nn.ReLU):
             name = 'relu_{}'.format(i)
-            # The in-place version doesn't play very nicely with the ContentLoss
-            # and StyleLoss we insert below. So we replace with out-of-place
-            # ones here.
             layer = nn.ReLU(inplace=False)
         elif isinstance(layer, nn.MaxPool2d):
             name = 'pool_{}'.format(i)
@@ -132,20 +100,19 @@ def get_style_model_and_losses(cnn, device,
         model.add_module(name, layer)
 
         if name in content_layers:
-            # add content loss:
+            # Добовляем потери стиля:
             target = model(content_img).detach()
             content_loss = ContentLoss(target)
             model.add_module("content_loss_{}".format(i), content_loss)
             content_losses.append(content_loss)
 
         if name in style_layers:
-            # add style loss:
+            # Добовляем потери контента:
             target_feature = model(style_img).detach()
             style_loss = StyleLoss(target_feature)
             model.add_module("style_loss_{}".format(i), style_loss)
             style_losses.append(style_loss)
 
-    # now we trim off the layers after the last content and style losses
     for i in range(len(model) - 1, -1, -1):
         if isinstance(model[i], ContentLoss) or isinstance(model[i], StyleLoss):
             break
@@ -156,7 +123,6 @@ def get_style_model_and_losses(cnn, device,
 
 
 def get_input_optimizer(input_img):
-    # this line to show that input is a parameter that requires a gradient
     optimizer = optim.LBFGS([input_img.requires_grad_()])
     return optimizer
 
@@ -164,18 +130,17 @@ def get_input_optimizer(input_img):
 def run_style_transfer(cnn, device,
                        content_img, style_img, input_img, num_steps=300,
                        style_weight=1000000, content_weight=1):
-    """Run the style transfer."""
-    print('Building the style transfer model..')
+    """Запускаем трансфер стиля."""
+    print('Генерируем модель..')
     model, style_losses, content_losses = get_style_model_and_losses(cnn,
                                                                      device, style_img, content_img)
     optimizer = get_input_optimizer(input_img)
 
-    print('Optimizing..')
+    print('Оптимизация..')
     run = [0]
     while run[0] <= num_steps:
 
         def closure():
-            # correct the values of updated input image
             input_img.data.clamp_(0, 1)
 
             optimizer.zero_grad()
@@ -205,7 +170,7 @@ def run_style_transfer(cnn, device,
 
         optimizer.step(closure)
 
-    # a last correction...
     input_img.data.clamp_(0, 1)
 
     return input_img
+
